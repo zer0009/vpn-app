@@ -1,0 +1,16 @@
+enum VPNStage {
+  prepare,
+  connecting,
+  authenticating,
+  getConfig,
+  assignIp,
+  connected,
+  disconnected,
+  error,
+  exiting,
+  resolve,
+  tcpConnect,
+  waitConnection,
+  vpnGenerateConfig,
+  unknown,
+} 
