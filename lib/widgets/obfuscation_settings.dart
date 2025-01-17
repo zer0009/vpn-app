@@ -195,6 +195,60 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
     }
   }
 
+  Future<void> _checkDomainStatus(String domain) async {
+    if (domain.isEmpty) {
+      setState(() {
+        _errorMessage = null;
+        _httpStatus = 'Please enter a domain';
+      });
+      return;
+    }
+
+    try {
+      setState(() {
+        _httpStatus = 'Checking domain...';
+        _errorMessage = null;
+      });
+
+      // Try HTTPS first
+      try {
+        final httpsResult = await http.get(
+          Uri.parse('https://$domain'),
+        ).timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => throw TimeoutException('HTTPS timeout'),
+        );
+        
+        setState(() {
+          _httpStatus = 'Domain Status: Available (HTTPS: ${httpsResult.statusCode})';
+        });
+        return;
+      } catch (e) {
+        // If HTTPS fails, try HTTP
+        final httpResult = await http.get(
+          Uri.parse('http://$domain'),
+        ).timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => throw TimeoutException('HTTP timeout'),
+        );
+        
+        setState(() {
+          _httpStatus = 'Domain Status: Available (HTTP: ${httpResult.statusCode})';
+        });
+      }
+    } on TimeoutException {
+      setState(() {
+        _httpStatus = 'Domain Status: Timeout (Server might be busy)';
+        _errorMessage = 'Connection timed out. Please try again.';
+      });
+    } catch (e) {
+      setState(() {
+        _httpStatus = 'Domain Status: Not available';
+        _errorMessage = 'Unable to connect to domain';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -390,37 +444,76 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
           ),
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _domainController,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: 'Enter domain (e.g., example.com)',
-            hintStyle: TextStyle(
-              color: Colors.white.withOpacity(0.3),
-            ),
-            filled: true,
-            fillColor: Colors.white.withOpacity(0.05),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(
-                color: Colors.white.withOpacity(0.1),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _domainController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Enter domain (e.g., example.com)',
+                  hintStyle: TextStyle(
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.05),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: AppColors.accent2,
+                    ),
+                  ),
+                ),
+                onChanged: (value) {
+                  // Clear previous status when typing
+                  setState(() {
+                    _httpStatus = null;
+                    _errorMessage = null;
+                  });
+                },
+                onSubmitted: (value) {
+                  _checkDomainStatus(value);
+                },
               ),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(
-                color: Colors.white.withOpacity(0.1),
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: () {
+                _checkDomainStatus(_domainController.text);
+              },
+              icon: const Icon(
+                Icons.refresh,
                 color: AppColors.accent2,
+              ),
+              tooltip: 'Check domain',
+            ),
+          ],
+        ),
+        if (_httpStatus != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _httpStatus!,
+              style: TextStyle(
+                color: _errorMessage != null 
+                    ? Colors.orange 
+                    : Colors.white.withOpacity(0.7),
+                fontSize: 12,
               ),
             ),
           ),
-          onChanged: (_) => _updateSettings(),
-        ),
       ],
     );
   }
