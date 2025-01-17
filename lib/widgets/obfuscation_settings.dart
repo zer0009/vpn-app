@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
 import '../providers/vpn_provider.dart';
 import '../constants/app_colors.dart';
 import '../models/obfuscation_types.dart';
 import '../services/obfuscation_service.dart';
 import 'dart:developer';
+import 'apply_button.dart';
+import 'dart:io';
+import 'dart:async';
+import 'dart:convert';
 
 class ObfuscationSettings extends StatefulWidget {
   const ObfuscationSettings({super.key});
@@ -22,12 +27,15 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
   List<ObfuscationType> _supportedTypes = [];
   bool _isCheckingCompatibility = false;
   Map<String, TextEditingController> _additionalParamsControllers = {};
+  bool _isApplying = false;
+  String? _httpStatus;
 
   @override
   void initState() {
     super.initState();
     _initializeSettings();
     _checkServerCompatibility();
+    _checkHttpStatus();
   }
 
   void _initializeSettings() {
@@ -122,6 +130,71 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
     }
   }
 
+  Future<void> _checkHttpStatus() async {
+    try {
+      setState(() {
+        _httpStatus = 'Checking HTTP status...';
+      });
+
+      final provider = context.read<VpnProvider>();
+      final server = provider.selectedServer;
+      
+      if (server != null) {
+        final result = await http.get(
+          Uri.parse('http://${server.hostname}'),
+        ).timeout(
+          const Duration(seconds: 3),
+          onTimeout: () {
+            throw TimeoutException('Connection timed out');
+          },
+        );
+        
+        setState(() {
+          _httpStatus = 'HTTP Status: ${result.statusCode}';
+        });
+      }
+    } on TimeoutException {
+      setState(() {
+        _httpStatus = 'HTTP Status: Timeout (Server might be busy)';
+      });
+    } catch (e) {
+      setState(() {
+        _httpStatus = 'HTTP Status: Not available';
+      });
+    }
+  }
+
+  Future<void> _applyChanges() async {
+    setState(() {
+      _isApplying = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _updateSettings();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Changes applied successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isApplying = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -171,6 +244,26 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
             _buildDomainInput(),
             _buildAdvancedSettings(),
           ],
+          if (_httpStatus != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                _httpStatus!,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          const SizedBox(height: 16),
+          
+          Center(
+            child: ApplyButton(
+              onPressed: _applyChanges,
+              isLoading: _isApplying,
+            ),
+          ),
+
           if (_errorMessage != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -182,6 +275,7 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
                 ),
               ),
             ),
+
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.only(top: 8),
@@ -199,6 +293,13 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
       );
     }
 
+    // Simplified obfuscation types
+    final availableTypes = [
+      ObfuscationType.none,
+      ObfuscationType.http,
+      ObfuscationType.tls,
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -213,21 +314,28 @@ class _ObfuscationSettingsState extends State<ObfuscationSettings> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: ObfuscationType.values
-              .where((type) => type == ObfuscationType.none || _supportedTypes.contains(type))
-              .map((type) => _buildTypeOption(type, type.toString().split('.').last.toUpperCase()))
+          children: availableTypes
+              .map((type) => _buildTypeOption(
+                    type,
+                    _getObfuscationLabel(type),
+                  ))
               .toList(),
         ),
-        if (_supportedTypes.isEmpty && !_isCheckingCompatibility)
-          Text(
-            'No supported obfuscation methods found for this server',
-            style: TextStyle(
-              color: Colors.orange.withOpacity(0.7),
-              fontSize: 12,
-            ),
-          ),
       ],
     );
+  }
+
+  String _getObfuscationLabel(ObfuscationType type) {
+    switch (type) {
+      case ObfuscationType.none:
+        return 'NONE';
+      case ObfuscationType.http:
+        return 'HTTP';
+      case ObfuscationType.tls:
+        return 'TLS';
+      default:
+        return type.toString().split('.').last.toUpperCase();
+    }
   }
 
   Widget _buildTypeOption(ObfuscationType type, String label) {
